@@ -13,8 +13,8 @@ import cv2
 # Add src directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from trash_detector import TrashDetector, TrashCollector
-from trash_detector.config import DEFAULT_CAMERA_INDEX
+from src.trash_detector import TrashDetector, TrashCollector
+from src.trash_detector.config import DEFAULT_CAMERA_INDEX
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
