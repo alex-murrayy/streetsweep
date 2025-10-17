@@ -12,7 +12,7 @@ from datetime import datetime
 # Add src directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from trash_detector import TrashCollector
+from src.trash_detector import TrashCollector
 
 
 def main():
