@@ -30,6 +30,8 @@ def main():
                        help='Path to trained model file')
     parser.add_argument('--confidence', type=float, default=0.5,
                        help='Confidence threshold for detections (default: 0.5)')
+    parser.add_argument('--advanced', action='store_true',
+                       help='Use advanced multi-model detector (much better accuracy)')
     parser.add_argument('--output', type=str, default=None,
                        help='Output video file path (optional)')
     parser.add_argument('--verbose', action='store_true',
@@ -50,7 +52,8 @@ def main():
     
     # Initialize detector
     detector = TrashDetector(model_path=args.model, 
-                           confidence_threshold=args.confidence)
+                           confidence_threshold=args.confidence,
+                           use_advanced=args.advanced)
     
     # Initialize collector if in collection mode
     collector = None

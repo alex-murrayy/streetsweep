@@ -10,6 +10,7 @@ import logging
 from typing import List, Dict, Optional
 
 from .models.yolo_model import YOLOModel
+from .models.advanced_detector import AdvancedTrashDetector
 from .utils.image_utils import draw_detections, list_available_cameras
 
 logger = logging.getLogger(__name__)
@@ -21,19 +22,24 @@ class TrashDetector:
     various types of litter from video feeds.
     """
     
-    def __init__(self, model_path: Optional[str] = None, confidence_threshold: float = 0.5):
+    def __init__(self, model_path: Optional[str] = None, confidence_threshold: float = 0.5, use_advanced: bool = False):
         """
         Initialize the trash detector.
         
         Args:
             model_path: Path to pre-trained model (optional)
             confidence_threshold: Minimum confidence for detections
+            use_advanced: Use advanced multi-model detector for better accuracy
         """
         self.confidence_threshold = confidence_threshold
         self.model_path = model_path
+        self.use_advanced = use_advanced
         
-        # Initialize YOLO model
-        self.model = YOLOModel(model_path=model_path, confidence_threshold=confidence_threshold)
+        # Initialize detector
+        if use_advanced:
+            self.model = AdvancedTrashDetector(confidence_threshold=confidence_threshold)
+        else:
+            self.model = YOLOModel(model_path=model_path, confidence_threshold=confidence_threshold)
     
     def detect_trash(self, frame: np.ndarray) -> List[Dict]:
         """
