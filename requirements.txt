@@ -6,7 +6,7 @@ Pillow>=9.0.0
 # Machine learning and deep learning frameworks
 # Note: TensorFlow compatibility varies by Python version
 # For Python 3.13, use tf-nightly (stable TensorFlow doesn't support 3.13 yet)
-tf-nightly>=2.21.0; python_version >= "3.13"
+tf-nightly>=2.21.0.dev20251013; python_version >= "3.13"
 tensorflow>=2.13.0; python_version < "3.13" and (platform_machine != "arm64" or platform_system != "Darwin")
 tensorflow-macos>=2.13.0; python_version < "3.13" and platform_machine == "arm64" and platform_system == "Darwin"
 torch>=2.0.0
