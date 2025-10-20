@@ -189,8 +189,14 @@ void executeStep() {
     return;
   }
   
-  // Get current step pattern
-  int stepPattern = currentStep % 8;
+  int stepPattern;
+
+  // Calculate the step pattern based on direction
+  if (currentState == FORWARD) {
+    stepPattern = currentStep % 8; // Cycles 0, 1, 2, ..., 7
+  } else { // BACKWARD
+    stepPattern = 7 - (currentStep % 8); // Cycles 7, 6, 5, ..., 0
+  }
   
   // Apply step pattern to motor pins
   digitalWrite(IN1_PIN, stepSequence[stepPattern][0]);
@@ -198,13 +204,8 @@ void executeStep() {
   digitalWrite(IN3_PIN, stepSequence[stepPattern][2]);
   digitalWrite(IN4_PIN, stepSequence[stepPattern][3]);
   
-  // Move to next step
-  if (currentState == FORWARD) {
-    currentStep++;
-  } else if (currentState == BACKWARD) {
-    currentStep++;
-    // For backward, we'll reverse the sequence in the next iteration
-  }
+  // Move to the next step in the overall rotation
+  currentStep++;
 }
 
 void stopMotor() {
