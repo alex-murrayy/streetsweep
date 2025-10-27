@@ -155,11 +155,12 @@ class PiTrashDetectionSystem:
     
     def __init__(self, camera_source: str = "0", arduino_port: str = '/dev/ttyUSB0', 
                  confidence_threshold: float = 0.5, use_advanced: bool = False,
-                 use_mjpg_streamer: bool = False):
+                 use_mjpg_streamer: bool = False, headless: bool = False):
         self.camera_source = camera_source
         self.confidence_threshold = confidence_threshold
         self.use_advanced = use_advanced
         self.use_mjpg_streamer = use_mjpg_streamer
+        self.headless = headless
         
         # Initialize detector
         self.detector = TrashDetector(
@@ -265,25 +266,30 @@ class PiTrashDetectionSystem:
                     cv2.putText(frame_with_detections, conf_text, (10, 90), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
                 
-                # Display frame
-                cv2.imshow('Pi Trash Detection with Motor Control', frame_with_detections)
-                
-                # Handle keyboard input (WASD scheme)
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    break
-                elif key == ord('x'):  # Stop motor
-                    self.arduino_controller.stop_motor()
-                elif key == ord('s'):  # Reverse/home
-                    self.arduino_controller.home_motor()
-                elif key == ord('t'):  # Test sequence
-                    self.arduino_controller.test_motor()
-                elif key == ord('w'):  # Manual forward
-                    self.arduino_controller.send_command('w')
-                elif key == ord('a'):  # Manual pivot left
-                    self.arduino_controller.send_command('a')
-                elif key == ord('d'):  # Manual pivot right
-                    self.arduino_controller.send_command('d')
+                # Display frame (only if not in headless mode)
+                if not self.headless:
+                    cv2.imshow('Pi Trash Detection with Motor Control', frame_with_detections)
+                    
+                    # Handle keyboard input (WASD scheme)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q'):
+                        break
+                    elif key == ord('x'):  # Stop motor
+                        self.arduino_controller.stop_motor()
+                    elif key == ord('s'):  # Reverse/home
+                        self.arduino_controller.home_motor()
+                    elif key == ord('t'):  # Test sequence
+                        self.arduino_controller.test_motor()
+                    elif key == ord('w'):  # Manual forward
+                        self.arduino_controller.send_command('w')
+                    elif key == ord('a'):  # Manual pivot left
+                        self.arduino_controller.send_command('a')
+                    elif key == ord('d'):  # Manual pivot right
+                        self.arduino_controller.send_command('d')
+                else:
+                    # In headless mode, just process frames without display
+                    # Add a small delay to prevent excessive CPU usage
+                    time.sleep(0.033)  # ~30 FPS
                 
                 # Log performance every 100 frames
                 if frame_count % 100 == 0:
@@ -303,7 +309,8 @@ class PiTrashDetectionSystem:
         finally:
             # Cleanup
             cap.release()
-            cv2.destroyAllWindows()
+            if not self.headless:
+                cv2.destroyAllWindows()
             self.arduino_controller.disconnect()
             
             # Performance statistics
@@ -355,6 +362,8 @@ def main():
                        help='Test camera connection and exit')
     parser.add_argument('--test-arduino', action='store_true',
                        help='Test Arduino connection and exit')
+    parser.add_argument('--headless', action='store_true',
+                       help='Run in headless mode (no GUI windows)')
     
     args = parser.parse_args()
     
@@ -399,7 +408,8 @@ def main():
         arduino_port=args.arduino_port,
         confidence_threshold=args.confidence,
         use_advanced=args.advanced,
-        use_mjpg_streamer=args.mjpg_streamer
+        use_mjpg_streamer=args.mjpg_streamer,
+        headless=args.headless
     )
     
     system.start()
