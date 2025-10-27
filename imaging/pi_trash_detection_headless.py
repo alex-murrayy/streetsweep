@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""
+Raspberry Pi Trash Detection with Arduino Motor Control (Headless Version)
+Runs without GUI display for headless operation on Raspberry Pi
+"""
+
+import sys
+import os
+import argparse
+import logging
+import time
+import serial
+import threading
+import queue
+import json
+import requests
+from typing import List, Dict, Optional
+
+# Add src directory to Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+from src.trash_detector import TrashDetector, TrashCollector
+from src.trash_detector.config import DEFAULT_CAMERA_INDEX
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Set environment variable to prevent GUI issues
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+
+
+class ArduinoController:
+    """Handles communication with Arduino R4 for motor control"""
+    
+    def __init__(self, serial_port: str = '/dev/ttyACM0', baud_rate: int = 9600):
+        self.serial_port = serial_port
+        self.baud_rate = baud_rate
+        self.serial_connection = None
+        self.is_connected = False
+        self.last_command_time = 0
+        self.command_cooldown = 1.0  # Minimum time between commands (seconds)
+        
+    def connect(self) -> bool:
+        """Connect to Arduino via serial"""
+        try:
+            self.serial_connection = serial.Serial(
+                port=self.serial_port,
+                baudrate=self.baud_rate,
+                timeout=1
+            )
+            time.sleep(2)  # Wait for Arduino to initialize
+            self.is_connected = True
+            logger.info(f"Connected to Arduino on {self.serial_port}")
+            
+            # Send test command to verify connection
+            self.send_command('i')  # Status command
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to Arduino: {e}")
+            return False
+    
+    def disconnect(self):
+        """Disconnect from Arduino"""
+        if self.serial_connection and self.serial_connection.is_open:
+            self.serial_connection.close()
+            self.is_connected = False
+            logger.info("Disconnected from Arduino")
+    
+    def send_command(self, command: str) -> bool:
+        """Send command to Arduino with cooldown protection"""
+        if not self.is_connected or not self.serial_connection:
+            logger.warning("Not connected to Arduino")
+            return False
+        
+        # Check cooldown to prevent excessive commands
+        current_time = time.time()
+        if current_time - self.last_command_time < self.command_cooldown:
+            return False
+        
+        try:
+            self.serial_connection.write(f"{command}\n".encode())
+            self.last_command_time = current_time
+            logger.debug(f"Sent command to Arduino: {command}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send command to Arduino: {e}")
+            return False
+    
+    def move_towards_trash(self, detection: Dict):
+        """Move motor based on trash detection position"""
+        if not detection:
+            return
+        
+        # Get center position of detection
+        center_x = detection.get('center', (0, 0))[0]
+        frame_width = 640  # Assuming standard webcam resolution
+        
+        # Calculate movement direction based on trash position
+        if center_x < frame_width * 0.3:  # Trash on left side
+            self.send_command('a')  # Pivot left (WASD scheme)
+            logger.info("Pivoting LEFT towards trash")
+        elif center_x > frame_width * 0.7:  # Trash on right side
+            self.send_command('d')  # Pivot right (WASD scheme)
+            logger.info("Pivoting RIGHT towards trash")
+        else:  # Trash in center
+            self.send_command('w')  # Move forward (WASD scheme)
+            logger.info("Moving FORWARD towards trash")
+    
+    def stop_motor(self):
+        """Stop motor movement"""
+        self.send_command('x')  # Stop command in WASD scheme
+        logger.info("Stopping motor")
+    
+    def home_motor(self):
+        """Move motor to home position"""
+        self.send_command('s')  # Reverse to home position
+        logger.info("Moving to home position")
+    
+    def test_motor(self):
+        """Run motor test sequence"""
+        # Test sequence: forward, pivot left, pivot right, stop
+        self.send_command('w')  # Forward
+        time.sleep(1)
+        self.send_command('a')  # Pivot left
+        time.sleep(1)
+        self.send_command('d')  # Pivot right
+        time.sleep(1)
+        self.send_command('x')  # Stop
+        logger.info("Running motor test sequence")
+
+
+class PiTrashDetectionSystem:
+    """Main system for running trash detection on Raspberry Pi with motor control"""
+    
+    def __init__(self, camera_source: str = "0", arduino_port: str = '/dev/ttyACM0', 
+                 confidence_threshold: float = 0.5, use_advanced: bool = False,
+                 use_mjpg_streamer: bool = False):
+        self.camera_source = camera_source
+        self.confidence_threshold = confidence_threshold
+        self.use_advanced = use_advanced
+        self.use_mjpg_streamer = use_mjpg_streamer
+        
+        # Initialize detector
+        self.detector = TrashDetector(
+            confidence_threshold=confidence_threshold,
+            use_advanced=use_advanced
+        )
+        
+        # Initialize Arduino controller
+        self.arduino_controller = ArduinoController(serial_port=arduino_port)
+        
+        # Detection tracking
+        self.last_detection_time = 0
+        self.detection_cooldown = 3.0  # Minimum time between motor movements (seconds)
+        self.consecutive_detections = 0
+        self.min_consecutive_detections = 2  # Require 2 consecutive detections before moving
+        
+    def start(self):
+        """Start the trash detection system"""
+        logger.info("Starting Pi Trash Detection System...")
+        
+        # Connect to Arduino
+        if not self.arduino_controller.connect():
+            logger.error("Failed to connect to Arduino. Continuing without motor control.")
+        
+        # Start video processing
+        self.process_video()
+    
+    def process_video(self):
+        """Process video feed and control motors based on detections"""
+        import cv2
+        
+        # Determine video source
+        if self.use_mjpg_streamer:
+            video_source = "http://localhost:8080/?action=stream"
+            logger.info(f"Using mjpg-streamer: {video_source}")
+        else:
+            video_source = int(self.camera_source) if self.camera_source.isdigit() else self.camera_source
+            logger.info(f"Using direct camera: {video_source}")
+        
+        # Open video source
+        cap = cv2.VideoCapture(video_source)
+        
+        if not cap.isOpened():
+            logger.error(f"Could not open video source: {video_source}")
+            return
+        
+        # Set camera properties for better performance
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        logger.info("Video source opened successfully")
+        logger.info("Press Ctrl+C to quit")
+        
+        frame_count = 0
+        start_time = time.time()
+        last_stats_time = time.time()
+        
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    logger.error("Failed to read frame from video source")
+                    break
+                
+                frame_count += 1
+                
+                # Detect trash in current frame
+                detections = self.detector.detect_trash(frame)
+                
+                # Process detections for motor control
+                if detections:
+                    self.process_detections_for_motor_control(detections)
+                else:
+                    self.consecutive_detections = 0
+                
+                # Log detection results
+                if detections:
+                    best_detection = max(detections, key=lambda d: d.get('confidence', 0))
+                    logger.info(f"Frame {frame_count}: Found {len(detections)} trash items")
+                    logger.info(f"  Best: {best_detection.get('class', 'trash')} "
+                               f"(confidence: {best_detection.get('confidence', 0):.2f})")
+                
+                # Log performance every 100 frames
+                if frame_count % 100 == 0:
+                    elapsed_time = time.time() - start_time
+                    fps = frame_count / elapsed_time
+                    logger.info(f"Processing at {fps:.1f} FPS")
+                
+                # Log stats every 30 seconds
+                current_time = time.time()
+                if current_time - last_stats_time > 30:
+                    logger.info(f"System running: {frame_count} frames processed")
+                    last_stats_time = current_time
+                
+        except KeyboardInterrupt:
+            logger.info("Processing interrupted by user")
+        
+        finally:
+            # Cleanup
+            cap.release()
+            self.arduino_controller.disconnect()
+            
+            # Performance statistics
+            elapsed_time = time.time() - start_time
+            avg_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
+            logger.info(f"Processed {frame_count} frames in {elapsed_time:.2f}s (avg FPS: {avg_fps:.2f})")
+    
+    def process_detections_for_motor_control(self, detections: List[Dict]):
+        """Process detections and send motor commands"""
+        current_time = time.time()
+        
+        # Check cooldown to prevent excessive motor movements
+        if current_time - self.last_detection_time < self.detection_cooldown:
+            return
+        
+        # Find the largest/most confident detection
+        best_detection = max(detections, key=lambda d: d.get('confidence', 0))
+        
+        # Only move if confidence is high enough
+        if best_detection.get('confidence', 0) > self.confidence_threshold:
+            self.consecutive_detections += 1
+            
+            # Only move after consecutive detections to avoid false positives
+            if self.consecutive_detections >= self.min_consecutive_detections:
+                self.arduino_controller.move_towards_trash(best_detection)
+                self.last_detection_time = current_time
+                self.consecutive_detections = 0  # Reset counter
+                
+                logger.info(f"Moving towards {best_detection.get('class', 'trash')} "
+                           f"(confidence: {best_detection.get('confidence', 0):.2f})")
+
+
+def main():
+    """Main function"""
+    parser = argparse.ArgumentParser(description='Pi Trash Detection with Arduino Motor Control (Headless)')
+    parser.add_argument('--camera', type=str, default='0', 
+                       help='Camera source: camera index (0,1,2...) or mjpg-streamer URL')
+    parser.add_argument('--arduino-port', type=str, default='/dev/ttyACM0',
+                       help='Arduino serial port (default: /dev/ttyACM0)')
+    parser.add_argument('--confidence', type=float, default=0.5,
+                       help='Confidence threshold for detections (default: 0.5)')
+    parser.add_argument('--advanced', action='store_true',
+                       help='Use advanced multi-model detector')
+    parser.add_argument('--mjpg-streamer', action='store_true',
+                       help='Use mjpg-streamer instead of direct camera')
+    parser.add_argument('--verbose', action='store_true',
+                       help='Enable verbose logging')
+    parser.add_argument('--test-camera', action='store_true',
+                       help='Test camera connection and exit')
+    parser.add_argument('--test-arduino', action='store_true',
+                       help='Test Arduino connection and exit')
+    
+    args = parser.parse_args()
+    
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Test camera if requested
+    if args.test_camera:
+        import cv2
+        if args.mjpg_streamer:
+            cap = cv2.VideoCapture("http://localhost:8080/?action=stream")
+        else:
+            cap = cv2.VideoCapture(int(args.camera))
+        
+        if cap.isOpened():
+            ret, frame = cap.read()
+            if ret:
+                logger.info(f"Camera working - resolution: {frame.shape}")
+            else:
+                logger.error("Camera opened but failed to read frame")
+        else:
+            logger.error(f"Could not open camera source: {args.camera}")
+        cap.release()
+        return
+    
+    # Test Arduino if requested
+    if args.test_arduino:
+        controller = ArduinoController(serial_port=args.arduino_port)
+        if controller.connect():
+            controller.test_motor()
+            time.sleep(2)
+            controller.stop_motor()
+            controller.disconnect()
+            logger.info("Arduino test completed")
+        else:
+            logger.error("Arduino test failed")
+        return
+    
+    # Create and start system
+    system = PiTrashDetectionSystem(
+        camera_source=args.camera,
+        arduino_port=args.arduino_port,
+        confidence_threshold=args.confidence,
+        use_advanced=args.advanced,
+        use_mjpg_streamer=args.mjpg_streamer
+    )
+    
+    system.start()
+
+
+if __name__ == "__main__":
+    main()
