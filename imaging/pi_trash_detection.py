@@ -96,28 +96,35 @@ class ArduinoController:
         
         # Calculate movement direction based on trash position
         if center_x < frame_width * 0.3:  # Trash on left side
-            self.send_command('l')  # Move left
-            logger.info("Moving LEFT towards trash")
+            self.send_command('a')  # Pivot left (WASD scheme)
+            logger.info("Pivoting LEFT towards trash")
         elif center_x > frame_width * 0.7:  # Trash on right side
-            self.send_command('r')  # Move right
-            logger.info("Moving RIGHT towards trash")
+            self.send_command('d')  # Pivot right (WASD scheme)
+            logger.info("Pivoting RIGHT towards trash")
         else:  # Trash in center
-            self.send_command('f')  # Move forward
+            self.send_command('w')  # Move forward (WASD scheme)
             logger.info("Moving FORWARD towards trash")
     
     def stop_motor(self):
         """Stop motor movement"""
-        self.send_command('s')
+        self.send_command('x')  # Stop command in WASD scheme
         logger.info("Stopping motor")
     
     def home_motor(self):
         """Move motor to home position"""
-        self.send_command('h')
+        self.send_command('s')  # Reverse to home position
         logger.info("Moving to home position")
     
     def test_motor(self):
         """Run motor test sequence"""
-        self.send_command('t')
+        # Test sequence: forward, pivot left, pivot right, stop
+        self.send_command('w')  # Forward
+        time.sleep(1)
+        self.send_command('a')  # Pivot left
+        time.sleep(1)
+        self.send_command('d')  # Pivot right
+        time.sleep(1)
+        self.send_command('x')  # Stop
         logger.info("Running motor test sequence")
 
 
@@ -261,16 +268,22 @@ class PiTrashDetectionSystem:
                 # Display frame
                 cv2.imshow('Pi Trash Detection with Motor Control', frame_with_detections)
                 
-                # Handle keyboard input
+                # Handle keyboard input (WASD scheme)
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     break
-                elif key == ord('s'):
+                elif key == ord('x'):  # Stop motor
                     self.arduino_controller.stop_motor()
-                elif key == ord('h'):
+                elif key == ord('s'):  # Reverse/home
                     self.arduino_controller.home_motor()
-                elif key == ord('t'):
+                elif key == ord('t'):  # Test sequence
                     self.arduino_controller.test_motor()
+                elif key == ord('w'):  # Manual forward
+                    self.arduino_controller.send_command('w')
+                elif key == ord('a'):  # Manual pivot left
+                    self.arduino_controller.send_command('a')
+                elif key == ord('d'):  # Manual pivot right
+                    self.arduino_controller.send_command('d')
                 
                 # Log performance every 100 frames
                 if frame_count % 100 == 0:
