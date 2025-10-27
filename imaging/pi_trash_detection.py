@@ -86,24 +86,13 @@ class ArduinoController:
             return False
     
     def move_towards_trash(self, detection: Dict):
-        """Move motor based on trash detection position"""
+        """Move both motors forward when trash is detected"""
         if not detection:
             return
         
-        # Get center position of detection
-        center_x = detection.get('center', (0, 0))[0]
-        frame_width = 640  # Assuming standard webcam resolution
-        
-        # Calculate movement direction based on trash position
-        if center_x < frame_width * 0.3:  # Trash on left side
-            self.send_command('a')  # Pivot left (WASD scheme)
-            logger.info("Pivoting LEFT towards trash")
-        elif center_x > frame_width * 0.7:  # Trash on right side
-            self.send_command('d')  # Pivot right (WASD scheme)
-            logger.info("Pivoting RIGHT towards trash")
-        else:  # Trash in center
-            self.send_command('w')  # Move forward (WASD scheme)
-            logger.info("Moving FORWARD towards trash")
+        # Always move forward when trash is detected
+        self.send_command('w')  # Move forward (WASD scheme)
+        logger.info("Moving FORWARD towards trash")
     
     def stop_motor(self):
         """Stop motor movement"""
