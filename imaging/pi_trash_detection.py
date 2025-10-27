@@ -211,7 +211,11 @@ class PiTrashDetectionSystem:
         cap.set(cv2.CAP_PROP_FPS, 30)
         
         logger.info("Video source opened successfully")
-        logger.info("Press 'q' to quit, 's' to stop motor, 'h' to home motor, 't' to test motor")
+        if self.headless:
+            logger.info("Headless mode: Type commands and press Enter")
+            self.print_headless_help()
+        else:
+            logger.info("Press 'q' to quit, 's' to stop motor, 'h' to home motor, 't' to test motor")
         
         frame_count = 0
         start_time = time.time()
@@ -276,7 +280,30 @@ class PiTrashDetectionSystem:
                     elif key == ord('d'):  # Manual pivot right
                         self.arduino_controller.send_command('d')
                 else:
-                    # In headless mode, just process frames without display
+                    # In headless mode, check for manual control via stdin
+                    import select
+                    import sys
+                    
+                    # Check if there's input available (non-blocking)
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        key = sys.stdin.readline().strip().lower()
+                        if key == 'q':
+                            break
+                        elif key == 'x':  # Stop motor
+                            self.arduino_controller.stop_motor()
+                        elif key == 's':  # Reverse/home
+                            self.arduino_controller.home_motor()
+                        elif key == 't':  # Test sequence
+                            self.arduino_controller.test_motor()
+                        elif key == 'w':  # Manual forward
+                            self.arduino_controller.send_command('w')
+                        elif key == 'a':  # Manual pivot left
+                            self.arduino_controller.send_command('a')
+                        elif key == 'd':  # Manual pivot right
+                            self.arduino_controller.send_command('d')
+                        elif key == 'h':  # Help
+                            self.print_headless_help()
+                    
                     # Add a small delay to prevent excessive CPU usage
                     time.sleep(0.033)  # ~30 FPS
                 
@@ -330,6 +357,20 @@ class PiTrashDetectionSystem:
                 
                 logger.info(f"Moving towards {best_detection.get('class', 'trash')} "
                            f"(confidence: {best_detection.get('confidence', 0):.2f})")
+
+    def print_headless_help(self):
+        """Print help for headless mode"""
+        logger.info("=== HEADLESS MODE CONTROLS ===")
+        logger.info("Type command and press Enter:")
+        logger.info("  w = Forward (both motors)")
+        logger.info("  s = Reverse (both motors)")
+        logger.info("  a = Pivot left")
+        logger.info("  d = Pivot right")
+        logger.info("  x = Stop")
+        logger.info("  t = Test sequence")
+        logger.info("  h = Show this help")
+        logger.info("  q = Quit")
+        logger.info("===============================")
 
 
 def main():
