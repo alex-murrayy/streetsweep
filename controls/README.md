@@ -1,201 +1,97 @@
-# Arduino Motor Control for ELEGoo UNO R3
+# Arduino Motor Control
 
-This directory contains Arduino code for controlling DC motors using an ELEGoo UNO R3 board. The code supports both basic and advanced motor control features.
+This directory contains Arduino sketches for controlling stepper motors in the StreetSweep trash detection robot.
 
-## Files
+## Available Sketches
 
-- `motor_control.ino` - Basic motor control with serial commands
-- `advanced_motor_control.ino` - Advanced motor control with acceleration, safety features, and LED indicators
-- `README.md` - This documentation file
+### `dual_stepper_wasd.ino` (Recommended)
 
-## Hardware Requirements
+Dual stepper motor control with WASD drive system for robot movement.
 
-### Basic Setup
+**Features:**
 
-- ELEGoo UNO R3 board
-- L298N Motor Driver Module
-- DC Motor (6-12V)
-- External power supply (6-12V for motor)
-- Jumper wires
-- Breadboard (optional)
+- Dual 28BYJ-48 stepper motors with ULN2003 drivers
+- WASD control scheme
+- Speed control and presets
+- Non-blocking motor control
 
-### Advanced Setup (includes basic setup plus)
-
-- 3x LEDs (for direction indicators)
-- 3x 220Ω resistors (for LEDs)
-
-## Wiring Diagram
-
-### L298N Motor Driver Connections
+**Wiring:**
 
 ```
-ELEGoo UNO R3    L298N Motor Driver
-─────────────────────────────────────
-Digital Pin 2    → IN1
-Digital Pin 3    → IN2
-Digital Pin 9    → ENA (PWM)
-5V               → VCC
-GND              → GND
-                 → VM (External 6-12V supply)
-                 → OUT1, OUT2 (Motor terminals)
+Motor Left  (A): IN1..IN4 → Pins 8, 9, 10, 11
+Motor Right (B): IN1..IN4 → Pins 4, 5, 6, 7
 ```
 
-### Optional LED Indicators (Advanced Version)
+**Commands:**
+
+- `W` - Forward
+- `A` - Pivot left
+- `D` - Pivot right
+- `S` - Reverse
+- `X` - Stop
+- `Q` - Slower
+- `E` - Faster
+- `1-5` - Speed presets
+- `H` - Help
+
+### `stepper_motor_control.ino`
+
+Single stepper motor control for basic movement.
+
+**Features:**
+
+- Single 28BYJ-48 stepper motor
+- Precise positioning
+- Speed control
+- Position memory
+
+**Wiring:**
 
 ```
-ELEGoo UNO R3    LED Circuit
-─────────────────────────────────────
-Digital Pin 4    → LED1 (Forward) + 220Ω resistor → GND
-Digital Pin 5    → LED2 (Backward) + 220Ω resistor → GND
-Digital Pin 6    → LED3 (Stop) + 220Ω resistor → GND
-```
-
-## Software Setup
-
-1. **Install Arduino IDE** (if not already installed)
-
-   - Download from: https://www.arduino.cc/en/software
-
-2. **Connect the ELEGoo UNO R3**
-
-   - Connect via USB cable
-   - Select the correct board: Tools → Board → Arduino Uno
-   - Select the correct port: Tools → Port → (your COM port)
-
-3. **Upload the Code**
-   - Open the desired `.ino` file
-   - Click the Upload button (→) or press Ctrl+U
-
-## Usage
-
-### Basic Motor Control
-
-After uploading `motor_control.ino`, open the Serial Monitor (Tools → Serial Monitor) and use these commands:
-
-| Command | Function                        |
-| ------- | ------------------------------- |
-| `f`     | Move forward                    |
-| `b`     | Move backward                   |
-| `s`     | Stop motor                      |
-| `+`     | Increase speed                  |
-| `-`     | Decrease speed                  |
-| `0-9`   | Set speed level (0=stop, 9=max) |
-
-### Advanced Motor Control
-
-After uploading `advanced_motor_control.ino`, use these commands:
-
-| Command | Function                                |
-| ------- | --------------------------------------- |
-| `f`     | Move forward                            |
-| `b`     | Move backward                           |
-| `s`     | Stop motor                              |
-| `+`     | Increase speed                          |
-| `-`     | Decrease speed                          |
-| `0-9`   | Set speed level (0=stop, 9=max)         |
-| `e`     | Emergency stop (press again to release) |
-| `r`     | Reset to defaults                       |
-| `i`     | Show status information                 |
-| `a`     | Toggle auto-acceleration                |
-
-## Features
-
-### Basic Version
-
-- ✅ PWM speed control (0-255)
-- ✅ Direction control (forward/backward/stop)
-- ✅ Serial command interface
-- ✅ Speed adjustment with +/- commands
-- ✅ Speed level setting (0-9)
-
-### Advanced Version
-
-- ✅ All basic features
-- ✅ Smooth acceleration/deceleration
-- ✅ LED direction indicators
-- ✅ Emergency stop functionality
-- ✅ Safety timeout (auto-stop after 30 seconds of inactivity)
-- ✅ Settings persistence (saved to EEPROM)
-- ✅ Status monitoring
-- ✅ Reset to defaults
-
-## Safety Features
-
-1. **Emergency Stop**: Press 'e' to immediately stop the motor
-2. **Safety Timeout**: Motor automatically stops after 30 seconds of no commands
-3. **Speed Limits**: Minimum and maximum speed constraints
-4. **Direction Validation**: Prevents invalid motor states
-
-## Troubleshooting
-
-### Motor Not Moving
-
-1. Check power connections (external supply to VM)
-2. Verify motor connections to OUT1 and OUT2
-3. Ensure proper ground connections
-4. Check if motor voltage matches supply voltage
-
-### Serial Commands Not Working
-
-1. Verify baud rate is set to 9600
-2. Check USB connection
-3. Ensure correct COM port is selected
-4. Try closing and reopening Serial Monitor
-
-### Motor Moving in Wrong Direction
-
-1. Swap the motor connections on OUT1 and OUT2
-2. Or modify the code to swap IN1 and IN2 logic
-
-### LED Indicators Not Working (Advanced Version)
-
-1. Check LED polarity (long leg = positive)
-2. Verify resistor connections
-3. Ensure proper ground connections
-
-## Customization
-
-### Changing Pin Assignments
-
-Modify these constants at the top of the code:
-
-```cpp
-const int IN1_PIN = 2;    // Change to desired pin
-const int IN2_PIN = 3;    // Change to desired pin
-const int ENA_PIN = 9;    // Change to desired pin (must be PWM capable)
-```
-
-### Adjusting Speed and Acceleration
-
-```cpp
-int maxSpeed = 255;           // Maximum PWM value
-int minSpeed = 50;            // Minimum speed to overcome friction
-const int ACCELERATION_STEP = 5;      // Speed change per step
-const int ACCELERATION_DELAY = 50;    // Delay between steps (ms)
-```
-
-### Safety Timeout
-
-```cpp
-const unsigned long SAFETY_TIMEOUT = 30000;  // 30 seconds (change as needed)
+Motor: IN1..IN4 → Pins 8, 9, 10, 11
 ```
 
 ## Power Requirements
 
-- **Arduino UNO**: 5V (from USB or external supply)
-- **L298N Module**: 5V (from Arduino)
-- **Motor**: 6-12V (external supply required)
-- **LEDs**: 5V (from Arduino, with current limiting resistors)
+- **5V regulated power supply** (2A or higher)
+- **All grounds must be connected together**
+- **Motors powered from external supply**
 
-## License
+## Upload Instructions
 
-This code is provided as-is for educational and development purposes. Use at your own risk.
+1. Connect Arduino to computer
+2. Open Arduino IDE
+3. Select correct board and port
+4. Upload the desired sketch
+5. Open Serial Monitor (9600 baud) to test
 
-## Support
+## Troubleshooting
 
-For issues or questions:
+### Motors Not Moving
 
-1. Check the troubleshooting section above
-2. Verify all connections match the wiring diagram
-3. Ensure proper power supply ratings
-4. Test with a simple LED first to verify Arduino functionality
+- Check power supply (5V, 2A+)
+- Verify all ground connections
+- Check motor wiring
+- Test with Serial Monitor commands
+
+### Upload Issues
+
+- Ensure correct board selected
+- Check USB connection
+- Try different USB port
+- Reset Arduino before upload
+
+### Communication Issues
+
+- Verify baud rate (9600)
+- Check serial port permissions
+- Test with Serial Monitor first
+
+## Integration with Pi
+
+The Pi script `pi_trash_detection.py` automatically sends commands to the Arduino based on trash detection results:
+
+- Trash on left → `A` (pivot left)
+- Trash in center → `W` (forward)
+- Trash on right → `D` (pivot right)
+- No trash → `X` (stop)
