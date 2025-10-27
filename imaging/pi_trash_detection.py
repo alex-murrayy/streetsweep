@@ -328,8 +328,8 @@ def main():
     parser = argparse.ArgumentParser(description='Pi Trash Detection with Arduino Motor Control')
     parser.add_argument('--camera', type=str, default='0', 
                        help='Camera source: camera index (0,1,2...) or mjpg-streamer URL')
-    parser.add_argument('--arduino-port', type=str, default='/dev/ttyUSB0',
-                       help='Arduino serial port (default: /dev/ttyUSB0)')
+    parser.add_argument('--arduino-port', type=str, default='/dev/ttyACM0',
+                       help='Arduino serial port (default: /dev/ttyACM0)')
     parser.add_argument('--confidence', type=float, default=0.5,
                        help='Confidence threshold for detections (default: 0.5)')
     parser.add_argument('--advanced', action='store_true',
