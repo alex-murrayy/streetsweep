@@ -15,6 +15,7 @@ import threading
 import queue
 import json
 import requests
+import glob
 from typing import List, Dict, Optional
 
 # Add src directory to Python path
@@ -28,10 +29,88 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def find_arduino_ports():
+    """Automatically find Arduino ports on Raspberry Pi"""
+    arduino_ports = []
+    
+    # Common Arduino port patterns on Linux/Raspberry Pi
+    port_patterns = [
+        '/dev/ttyACM*',  # Most common for Arduino Uno/Nano
+        '/dev/ttyUSB*',  # USB-to-serial adapters
+        '/dev/ttyAMA*',  # Raspberry Pi UART
+    ]
+    
+    for pattern in port_patterns:
+        ports = glob.glob(pattern)
+        arduino_ports.extend(ports)
+    
+    # Filter out ports that are likely not Arduino
+    filtered_ports = []
+    for port in arduino_ports:
+        # Skip if it's a Bluetooth or other non-Arduino device
+        if any(skip in port.lower() for skip in ['bluetooth', 'gps', 'modem']):
+            continue
+        filtered_ports.append(port)
+    
+    return sorted(filtered_ports)
+
+
+def auto_detect_arduino_port():
+    """Auto-detect the best Arduino port"""
+    ports = find_arduino_ports()
+    
+    if not ports:
+        logger.warning("No Arduino ports found!")
+        logger.warning("Make sure your Arduino is connected via USB.")
+        return None
+    
+    logger.info(f"Found Arduino ports: {ports}")
+    
+    # Try each port to see which one responds
+    for port in ports:
+        try:
+            logger.info(f"Testing {port}...")
+            ser = serial.Serial(port=port, baudrate=9600, timeout=1)
+            time.sleep(1)  # Give Arduino time to initialize
+            
+            # Send a test command
+            ser.write(b'h\n')  # Help command
+            time.sleep(0.5)
+            
+            # Check if we get a response
+            if ser.in_waiting > 0:
+                response = ser.readline().decode().strip()
+                if response:
+                    logger.info(f"✓ Arduino responding on {port}: {response}")
+                    ser.close()
+                    return port
+            
+            ser.close()
+            
+        except Exception as e:
+            logger.debug(f"✗ {port}: {e}")
+            continue
+    
+    # If no port responded, return the first available one
+    if ports:
+        logger.info(f"Using first available port: {ports[0]}")
+        return ports[0]
+    
+    return None
+
+
 class ArduinoController:
     """Handles communication with Arduino R4 for motor control"""
     
-    def __init__(self, serial_port: str = '/dev/ttyUSB0', baud_rate: int = 9600):
+    def __init__(self, serial_port: str = None, baud_rate: int = 9600):
+        # Auto-detect port if not specified
+        if serial_port is None:
+            logger.info("Auto-detecting Arduino port...")
+            serial_port = auto_detect_arduino_port()
+            if serial_port is None:
+                logger.warning("Could not auto-detect Arduino port!")
+                serial_port = '/dev/ttyACM0'  # Fallback to default
+        
         self.serial_port = serial_port
         self.baud_rate = baud_rate
         self.serial_connection = None
@@ -378,8 +457,8 @@ def main():
     parser = argparse.ArgumentParser(description='Pi Trash Detection with Arduino Motor Control')
     parser.add_argument('--camera', type=str, default='0', 
                        help='Camera source: camera index (0,1,2...) or mjpg-streamer URL')
-    parser.add_argument('--arduino-port', type=str, default='/dev/ttyACM0',
-                       help='Arduino serial port (default: /dev/ttyACM0)')
+    parser.add_argument('--arduino-port', type=str, default=None,
+                       help='Arduino serial port (auto-detected if not specified)')
     parser.add_argument('--confidence', type=float, default=0.5,
                        help='Confidence threshold for detections (default: 0.5)')
     parser.add_argument('--advanced', action='store_true',
