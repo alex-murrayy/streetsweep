@@ -205,7 +205,8 @@ class OptimizedPiTrashDetectionSystem:
     
     def __init__(self, camera_source: str = "0", arduino_port: str = None, 
                  confidence_threshold: float = 0.6, use_advanced: bool = False,
-                 headless: bool = False, frame_skip: int = 3, simulate_motors: bool = False):
+                 headless: bool = False, frame_skip: int = 3, simulate_motors: bool = False,
+                 stop_timeout: float = 3.0):
         self.camera_source = camera_source
         self.confidence_threshold = confidence_threshold
         self.use_advanced = use_advanced
@@ -232,6 +233,11 @@ class OptimizedPiTrashDetectionSystem:
         self.consecutive_detections = 0
         self.min_consecutive_detections = 1  # Reduced from 2
         self.frame_count = 0
+        
+        # No detection timeout - stop motors if no trash detected for X seconds
+        self.no_detection_timeout = stop_timeout
+        self.last_stop_time = 0
+        self.stop_cooldown = 2.0  # Don't spam stop commands
         
     def start(self):
         """Start the optimized trash detection system"""
@@ -299,7 +305,9 @@ class OptimizedPiTrashDetectionSystem:
                 if detections:
                     self.process_detections_for_motor_control(detections)
                 else:
+                    # No detections - check if we should stop motors
                     self.consecutive_detections = 0
+                    self.check_no_detection_timeout()
                 
                 # Draw detections on original frame
                 frame_with_detections = self.detector.draw_detections(frame.copy(), detections)
@@ -414,6 +422,27 @@ class OptimizedPiTrashDetectionSystem:
                 self.last_detection_time = current_time
                 self.consecutive_detections = 0  # Reset counter
 
+    def check_no_detection_timeout(self):
+        """Check if we should stop motors due to no detections"""
+        current_time = time.time()
+        
+        # Only check if we've had detections before
+        if self.last_detection_time > 0:
+            time_since_last_detection = current_time - self.last_detection_time
+            
+            # If no detections for the timeout period, stop motors
+            if time_since_last_detection > self.no_detection_timeout:
+                # Check cooldown to avoid spamming stop commands
+                if current_time - self.last_stop_time > self.stop_cooldown:
+                    if self.simulate_motors:
+                        logger.info("[SIMULATION] STOP - No trash detected for 3+ seconds")
+                    else:
+                        self.arduino_controller.stop_motor()
+                        logger.info("STOP - No trash detected for 3+ seconds")
+                    
+                    self.last_stop_time = current_time
+                    self.last_detection_time = 0  # Reset to avoid repeated stops
+
     def print_headless_help(self):
         """Print help for headless mode"""
         logger.info("=== HEADLESS MODE CONTROLS ===")
@@ -441,6 +470,8 @@ def main():
                        help='Process every Nth frame for better performance (default: 3)')
     parser.add_argument('--simulate-motors', action='store_true',
                        help='Run in simulation mode (no Arduino needed)')
+    parser.add_argument('--stop-timeout', type=float, default=3.0,
+                       help='Stop motors after X seconds of no detections (default: 3.0)')
     parser.add_argument('--verbose', action='store_true',
                        help='Enable verbose logging')
     
@@ -457,7 +488,8 @@ def main():
         use_advanced=args.advanced,
         headless=args.headless,
         frame_skip=args.frame_skip,
-        simulate_motors=args.simulate_motors
+        simulate_motors=args.simulate_motors,
+        stop_timeout=args.stop_timeout
     )
     
     system.start()
