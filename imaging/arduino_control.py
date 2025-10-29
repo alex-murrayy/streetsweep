@@ -207,52 +207,39 @@ def interactive_control(port=None):
         
         print("Interactive Arduino Control with Speed Control")
         print("Movement Commands: w/a/s/d/x (WASD)")
-        print("Speed Commands: 1-9 (speed levels), 0 (stop)")
-        print("Other Commands: h (help), q (quit)")
-        print("Speed Control: + (increase), - (decrease)")
+        print("Speed Commands: 1-5 (speed presets), q/e (slower/faster)")
+        print("Other Commands: h (help), quit (quit)")
+        print("Speed Control: q (slower), e (faster)")
         
-        current_speed = 5  # Default medium speed (1-9 scale)
+        current_speed = 3  # Default medium speed (1-5 scale)
         
         while True:
             command = input(f"\nEnter command (speed: {current_speed}): ").strip().lower()
             
-            if command == 'q':
+            if command == 'quit':
                 break
             elif command == 'h':
                 print_help()
-            elif command in ['1', '2', '3', '4', '5', '6', '7', '8', '9']:
-                # Set specific speed
+            elif command in ['1', '2', '3', '4', '5']:
+                # Set specific speed preset (Arduino expects 1-5)
                 current_speed = int(command)
-                ser.write(f"s{current_speed}\n".encode())
-                print(f"Speed set to: {current_speed}")
+                ser.write(f"{command}\n".encode())
+                print(f"Speed preset set to: {current_speed}")
                 time.sleep(0.3)
-            elif command == '0':
-                # Stop motors
-                ser.write("x\n".encode())
-                print("Motors stopped")
+            elif command == 'q':
+                # Slower speed (Arduino command)
+                ser.write("q\n".encode())
+                print("Speed decreased")
                 time.sleep(0.3)
-            elif command == '+':
-                # Increase speed
-                if current_speed < 9:
-                    current_speed += 1
-                    ser.write(f"s{current_speed}\n".encode())
-                    print(f"Speed increased to: {current_speed}")
-                else:
-                    print("Already at maximum speed (9)")
-                time.sleep(0.3)
-            elif command == '-':
-                # Decrease speed
-                if current_speed > 1:
-                    current_speed -= 1
-                    ser.write(f"s{current_speed}\n".encode())
-                    print(f"Speed decreased to: {current_speed}")
-                else:
-                    print("Already at minimum speed (1)")
+            elif command == 'e':
+                # Faster speed (Arduino command)
+                ser.write("e\n".encode())
+                print("Speed increased")
                 time.sleep(0.3)
             elif command in ['w', 'a', 's', 'd']:
-                # Movement commands with current speed
-                ser.write(f"{command}{current_speed}\n".encode())
-                print(f"Moving {command.upper()} at speed {current_speed}")
+                # Movement commands (Arduino expects single characters)
+                ser.write(f"{command}\n".encode())
+                print(f"Moving {command.upper()}")
                 time.sleep(0.3)
             elif command == 'x':
                 # Stop command
@@ -290,19 +277,19 @@ def print_help():
     print("  x = Stop")
     print("")
     print("SPEED CONTROL:")
-    print("  1-9 = Set specific speed level (1=slowest, 9=fastest)")
-    print("  0   = Stop motors")
-    print("  +   = Increase speed by 1")
-    print("  -   = Decrease speed by 1")
+    print("  1-5 = Set speed presets (1=300, 2=600, 3=800, 4=1000, 5=1200 sps)")
+    print("  q   = Decrease speed by 100 steps/sec")
+    print("  e   = Increase speed by 100 steps/sec")
     print("")
     print("OTHER COMMANDS:")
-    print("  h = Show this help")
-    print("  q = Quit")
+    print("  h     = Show this help")
+    print("  quit  = Quit program")
     print("")
     print("EXAMPLES:")
-    print("  w5 = Move forward at speed 5")
-    print("  a3 = Pivot left at speed 3")
-    print("  s9 = Move backward at maximum speed")
+    print("  w = Move forward at current speed")
+    print("  3 = Set speed to preset 3 (800 sps)")
+    print("  q = Decrease speed")
+    print("  e = Increase speed")
     print("="*50)
 
 def main():
@@ -347,9 +334,9 @@ def main():
         print("")
         print("Interactive Mode Features:")
         print("  • Auto-detects Arduino port")
-        print("  • Speed control (1-9 levels)")
+        print("  • Speed control (1-5 presets, q/e adjustment)")
         print("  • WASD movement controls")
-        print("  • Real-time speed adjustment (+/-)")
+        print("  • Real-time speed adjustment (q/e)")
         print("")
         print("Note: Port auto-detection is enabled by default!")
         print("Use --port /dev/ttyACM1 to specify a specific port if needed.")
