@@ -27,6 +27,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.trash_detector import TrashDetector, TrashCollector
 from src.trash_detector.config import DEFAULT_CAMERA_INDEX
 
+# Import the working Arduino controller from arduino_control.py
+sys.path.append(os.path.dirname(__file__))
+from arduino_control import auto_detect_arduino_port, send_arduino_command
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -102,10 +106,10 @@ def auto_detect_arduino_port():
     return None
 
 
-class OptimizedArduinoController:
-    """Optimized Arduino controller with better motor control"""
+class SimpleArduinoController:
+    """Simple Arduino controller using the working arduino_control.py logic"""
     
-    def __init__(self, serial_port: str = None, baud_rate: int = 9600):
+    def __init__(self, serial_port: str = None):
         # Auto-detect port if not specified
         if serial_port is None:
             logger.info("Auto-detecting Arduino port...")
@@ -115,42 +119,34 @@ class OptimizedArduinoController:
                 serial_port = '/dev/ttyACM0'  # Fallback to default
         
         self.serial_port = serial_port
-        self.baud_rate = baud_rate
-        self.serial_connection = None
         self.is_connected = False
         self.last_command_time = 0
-        self.command_cooldown = 0.5  # Reduced from 1.0 seconds
-        self.current_speed = 3  # Default speed preset
+        self.command_cooldown = 0.5  # Half second between commands
         
     def connect(self) -> bool:
         """Connect to Arduino via serial"""
         try:
-            self.serial_connection = serial.Serial(
-                port=self.serial_port,
-                baudrate=self.baud_rate,
-                timeout=1
-            )
-            time.sleep(2)  # Wait for Arduino to initialize
-            self.is_connected = True
-            logger.info(f"Connected to Arduino on {self.serial_port}")
-            
-            # Set initial speed
-            self.send_command(str(self.current_speed))
-            return True
+            # Test connection by sending a command
+            result = send_arduino_command(self.serial_port, 'h')
+            if result:
+                self.is_connected = True
+                logger.info(f"Connected to Arduino on {self.serial_port}")
+                return True
+            else:
+                logger.error("Failed to connect to Arduino")
+                return False
         except Exception as e:
             logger.error(f"Failed to connect to Arduino: {e}")
             return False
     
     def disconnect(self):
         """Disconnect from Arduino"""
-        if self.serial_connection and self.serial_connection.is_open:
-            self.serial_connection.close()
-            self.is_connected = False
-            logger.info("Disconnected from Arduino")
+        self.is_connected = False
+        logger.info("Disconnected from Arduino")
     
     def send_command(self, command: str) -> bool:
-        """Send command to Arduino with cooldown protection"""
-        if not self.is_connected or not self.serial_connection:
+        """Send command to Arduino using the working arduino_control.py function"""
+        if not self.is_connected:
             logger.warning("Not connected to Arduino")
             return False
         
@@ -160,10 +156,10 @@ class OptimizedArduinoController:
             return False
         
         try:
-            self.serial_connection.write(f"{command}\n".encode())
+            result = send_arduino_command(self.serial_port, command)
             self.last_command_time = current_time
             logger.debug(f"Sent command to Arduino: {command}")
-            return True
+            return result
         except Exception as e:
             logger.error(f"Failed to send command to Arduino: {e}")
             return False
@@ -200,7 +196,6 @@ class OptimizedArduinoController:
     def set_speed(self, speed: int):
         """Set motor speed (1-5)"""
         if 1 <= speed <= 5:
-            self.current_speed = speed
             self.send_command(str(speed))
             logger.info(f"Speed set to {speed}")
 
@@ -210,12 +205,13 @@ class OptimizedPiTrashDetectionSystem:
     
     def __init__(self, camera_source: str = "0", arduino_port: str = None, 
                  confidence_threshold: float = 0.6, use_advanced: bool = False,
-                 headless: bool = False, frame_skip: int = 3):
+                 headless: bool = False, frame_skip: int = 3, simulate_motors: bool = False):
         self.camera_source = camera_source
         self.confidence_threshold = confidence_threshold
         self.use_advanced = use_advanced
         self.headless = headless
         self.frame_skip = frame_skip  # Process every Nth frame
+        self.simulate_motors = simulate_motors
         
         # Initialize detector with optimized settings
         self.detector = TrashDetector(
@@ -224,7 +220,11 @@ class OptimizedPiTrashDetectionSystem:
         )
         
         # Initialize Arduino controller
-        self.arduino_controller = OptimizedArduinoController(serial_port=arduino_port)
+        if simulate_motors:
+            self.arduino_controller = None
+            logger.info("Motor simulation mode enabled - no Arduino needed")
+        else:
+            self.arduino_controller = SimpleArduinoController(serial_port=arduino_port)
         
         # Detection tracking (more responsive)
         self.last_detection_time = 0
@@ -238,8 +238,11 @@ class OptimizedPiTrashDetectionSystem:
         logger.info("Starting Optimized Pi Trash Detection System...")
         
         # Connect to Arduino
-        if not self.arduino_controller.connect():
-            logger.error("Failed to connect to Arduino. Continuing without motor control.")
+        if not self.simulate_motors:
+            if not self.arduino_controller.connect():
+                logger.error("Failed to connect to Arduino. Continuing without motor control.")
+        else:
+            logger.info("Running in simulation mode - motor commands will be logged only")
         
         # Start video processing
         self.process_video()
@@ -307,9 +310,18 @@ class OptimizedPiTrashDetectionSystem:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 
                 # Add motor status
-                motor_status = "MOTOR: CONNECTED" if self.arduino_controller.is_connected else "MOTOR: DISCONNECTED"
+                if self.simulate_motors:
+                    motor_status = "MOTOR: SIMULATION MODE"
+                    color = (255, 255, 0)  # Yellow
+                elif self.arduino_controller and self.arduino_controller.is_connected:
+                    motor_status = "MOTOR: CONNECTED"
+                    color = (0, 255, 0)  # Green
+                else:
+                    motor_status = "MOTOR: DISCONNECTED"
+                    color = (0, 0, 255)  # Red
+                
                 cv2.putText(frame_with_detections, motor_status, (10, 60), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0) if self.arduino_controller.is_connected else (0, 0, 255), 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 
                 # Display frame (only if not in headless mode)
                 if not self.headless:
@@ -380,12 +392,27 @@ class OptimizedPiTrashDetectionSystem:
             
             # Only move after consecutive detections to avoid false positives
             if self.consecutive_detections >= self.min_consecutive_detections:
-                self.arduino_controller.move_towards_trash(best_detection)
+                if self.simulate_motors:
+                    # Simulation mode - just log the action
+                    bbox = best_detection.get('bbox', [0, 0, 100, 100])
+                    x_center = (bbox[0] + bbox[2]) / 2
+                    frame_width = 640
+                    
+                    if x_center < frame_width * 0.3:
+                        action = "PIVOT LEFT"
+                    elif x_center > frame_width * 0.7:
+                        action = "PIVOT RIGHT"
+                    else:
+                        action = "MOVE FORWARD"
+                    
+                    logger.info(f"[SIMULATION] {action} towards {best_detection.get('class', 'trash')} "
+                               f"(confidence: {best_detection.get('confidence', 0):.2f})")
+                else:
+                    # Real mode - send commands to Arduino
+                    self.arduino_controller.move_towards_trash(best_detection)
+                
                 self.last_detection_time = current_time
                 self.consecutive_detections = 0  # Reset counter
-                
-                logger.info(f"Moving towards {best_detection.get('class', 'trash')} "
-                           f"(confidence: {best_detection.get('confidence', 0):.2f})")
 
     def print_headless_help(self):
         """Print help for headless mode"""
@@ -412,6 +439,8 @@ def main():
                        help='Run in headless mode (no GUI windows)')
     parser.add_argument('--frame-skip', type=int, default=3,
                        help='Process every Nth frame for better performance (default: 3)')
+    parser.add_argument('--simulate-motors', action='store_true',
+                       help='Run in simulation mode (no Arduino needed)')
     parser.add_argument('--verbose', action='store_true',
                        help='Enable verbose logging')
     
@@ -427,7 +456,8 @@ def main():
         confidence_threshold=args.confidence,
         use_advanced=args.advanced,
         headless=args.headless,
-        frame_skip=args.frame_skip
+        frame_skip=args.frame_skip,
+        simulate_motors=args.simulate_motors
     )
     
     system.start()
