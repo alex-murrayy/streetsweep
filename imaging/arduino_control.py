@@ -192,7 +192,7 @@ def send_arduino_command(port=None, command='h'):
         return False
 
 def interactive_control(port=None):
-    """Interactive Arduino control"""
+    """Interactive Arduino control with speed control"""
     # Auto-detect port if not specified
     if port is None:
         print("Auto-detecting Arduino port...")
@@ -205,29 +205,105 @@ def interactive_control(port=None):
         ser = serial.Serial(port=port, baudrate=9600, timeout=1)
         time.sleep(1)
         
-        print("Interactive Arduino Control")
-        print("Commands: w/a/s/d/x (WASD), h (help), q (quit)")
+        print("Interactive Arduino Control with Speed Control")
+        print("Movement Commands: w/a/s/d/x (WASD)")
+        print("Speed Commands: 1-9 (speed levels), 0 (stop)")
+        print("Other Commands: h (help), q (quit)")
+        print("Speed Control: + (increase), - (decrease)")
+        
+        current_speed = 5  # Default medium speed (1-9 scale)
         
         while True:
-            command = input("\nEnter command: ").strip().lower()
+            command = input(f"\nEnter command (speed: {current_speed}): ").strip().lower()
             
             if command == 'q':
                 break
-            elif command:
-                ser.write(f"{command}\n".encode())
+            elif command == 'h':
+                print_help()
+            elif command in ['1', '2', '3', '4', '5', '6', '7', '8', '9']:
+                # Set specific speed
+                current_speed = int(command)
+                ser.write(f"s{current_speed}\n".encode())
+                print(f"Speed set to: {current_speed}")
                 time.sleep(0.3)
-                
-                # Read response
-                while ser.in_waiting > 0:
-                    response = ser.readline().decode().strip()
-                    if response:
-                        print(f"Arduino: {response}")
+            elif command == '0':
+                # Stop motors
+                ser.write("x\n".encode())
+                print("Motors stopped")
+                time.sleep(0.3)
+            elif command == '+':
+                # Increase speed
+                if current_speed < 9:
+                    current_speed += 1
+                    ser.write(f"s{current_speed}\n".encode())
+                    print(f"Speed increased to: {current_speed}")
+                else:
+                    print("Already at maximum speed (9)")
+                time.sleep(0.3)
+            elif command == '-':
+                # Decrease speed
+                if current_speed > 1:
+                    current_speed -= 1
+                    ser.write(f"s{current_speed}\n".encode())
+                    print(f"Speed decreased to: {current_speed}")
+                else:
+                    print("Already at minimum speed (1)")
+                time.sleep(0.3)
+            elif command in ['w', 'a', 's', 'd']:
+                # Movement commands with current speed
+                ser.write(f"{command}{current_speed}\n".encode())
+                print(f"Moving {command.upper()} at speed {current_speed}")
+                time.sleep(0.3)
+            elif command == 'x':
+                # Stop command
+                ser.write("x\n".encode())
+                print("Stop command sent")
+                time.sleep(0.3)
+            elif command:
+                # Send raw command
+                ser.write(f"{command}\n".encode())
+                print(f"Sent raw command: {command}")
+                time.sleep(0.3)
+            
+            # Read response
+            while ser.in_waiting > 0:
+                response = ser.readline().decode().strip()
+                if response:
+                    print(f"Arduino: {response}")
         
         ser.close()
         print("Disconnected.")
         
     except Exception as e:
         print(f"Error: {e}")
+
+def print_help():
+    """Print detailed help for interactive mode"""
+    print("\n" + "="*50)
+    print("ARDUINO INTERACTIVE CONTROL HELP")
+    print("="*50)
+    print("MOVEMENT COMMANDS:")
+    print("  w = Forward")
+    print("  s = Reverse/Backward")
+    print("  a = Pivot Left")
+    print("  d = Pivot Right")
+    print("  x = Stop")
+    print("")
+    print("SPEED CONTROL:")
+    print("  1-9 = Set specific speed level (1=slowest, 9=fastest)")
+    print("  0   = Stop motors")
+    print("  +   = Increase speed by 1")
+    print("  -   = Decrease speed by 1")
+    print("")
+    print("OTHER COMMANDS:")
+    print("  h = Show this help")
+    print("  q = Quit")
+    print("")
+    print("EXAMPLES:")
+    print("  w5 = Move forward at speed 5")
+    print("  a3 = Pivot left at speed 3")
+    print("  s9 = Move backward at maximum speed")
+    print("="*50)
 
 def main():
     """Main function"""
@@ -262,12 +338,18 @@ def main():
     elif args.interactive:
         interactive_control(args.port)
     else:
-        print("Arduino Remote Control with Auto-Detection")
+        print("Arduino Remote Control with Auto-Detection & Speed Control")
         print("Usage:")
         print("  python3 arduino_control.py --list-ports      # List available ports")
         print("  python3 arduino_control.py --detect          # Detect current sketch")
         print("  python3 arduino_control.py --command w       # Send single command")
-        print("  python3 arduino_control.py --interactive    # Interactive mode")
+        print("  python3 arduino_control.py --interactive    # Interactive mode with speed control")
+        print("")
+        print("Interactive Mode Features:")
+        print("  • Auto-detects Arduino port")
+        print("  • Speed control (1-9 levels)")
+        print("  • WASD movement controls")
+        print("  • Real-time speed adjustment (+/-)")
         print("")
         print("Note: Port auto-detection is enabled by default!")
         print("Use --port /dev/ttyACM1 to specify a specific port if needed.")
