@@ -27,9 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.trash_detector import TrashDetector, TrashCollector
 from src.trash_detector.config import DEFAULT_CAMERA_INDEX
 
-# Import the working Arduino controller from arduino_control.py
+# Import RC car controller
 sys.path.append(os.path.dirname(__file__))
-from arduino_control import auto_detect_arduino_port, send_arduino_command
+from rc_car_controller import auto_detect_arduino_port, send_rc_command
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -106,8 +106,8 @@ def auto_detect_arduino_port():
     return None
 
 
-class SimpleArduinoController:
-    """Simple Arduino controller using the working arduino_control.py logic"""
+class RCCarController:
+    """RC Car controller for Arduino R4 using <steer,throttle> protocol"""
     
     def __init__(self, serial_port: str = None):
         # Auto-detect port if not specified
@@ -121,16 +121,24 @@ class SimpleArduinoController:
         self.serial_port = serial_port
         self.is_connected = False
         self.last_command_time = 0
-        self.command_cooldown = 0.5  # Half second between commands
+        self.command_cooldown = 0.1  # 100ms between commands (faster for RC car)
+        
+        # RC Car parameters
+        self.frame_width = 640  # Camera frame width
+        self.steer_center = 90  # Center steering angle
+        self.steer_min = 45  # Left limit
+        self.steer_max = 135  # Right limit
+        self.throttle_min = 50  # Minimum throttle to move (avoid dead zone)
+        self.throttle_max = 200  # Maximum throttle for safety
         
     def connect(self) -> bool:
         """Connect to Arduino via serial"""
         try:
-            # Test connection by sending a command
-            result = send_arduino_command(self.serial_port, 'h')
+            # Test connection by sending a stop command
+            result = send_rc_command(self.serial_port, self.steer_center, 0)
             if result:
                 self.is_connected = True
-                logger.info(f"Connected to Arduino on {self.serial_port}")
+                logger.info(f"Connected to RC Car Arduino on {self.serial_port}")
                 return True
             else:
                 logger.error("Failed to connect to Arduino")
@@ -141,11 +149,14 @@ class SimpleArduinoController:
     
     def disconnect(self):
         """Disconnect from Arduino"""
+        # Send stop command before disconnecting
+        if self.is_connected:
+            send_rc_command(self.serial_port, self.steer_center, 0)
         self.is_connected = False
         logger.info("Disconnected from Arduino")
     
-    def send_command(self, command: str) -> bool:
-        """Send command to Arduino using the working arduino_control.py function"""
+    def send_rc_command(self, steer_angle: int, throttle: int) -> bool:
+        """Send RC car command to Arduino"""
         if not self.is_connected:
             logger.warning("Not connected to Arduino")
             return False
@@ -156,48 +167,61 @@ class SimpleArduinoController:
             return False
         
         try:
-            result = send_arduino_command(self.serial_port, command)
+            # Call the imported function directly
+            result = send_rc_command(self.serial_port, steer_angle, throttle)
             self.last_command_time = current_time
-            logger.debug(f"Sent command to Arduino: {command}")
+            logger.debug(f"Sent RC command: <{steer_angle},{throttle}>")
             return result
         except Exception as e:
-            logger.error(f"Failed to send command to Arduino: {e}")
+            logger.error(f"Failed to send RC command: {e}")
             return False
     
     def move_towards_trash(self, detection: Dict):
-        """Move towards detected trash with smart steering"""
+        """Move towards detected trash with smart steering and throttle"""
         if not detection:
             return
         
-        # Get detection position for steering
+        # Get detection position and confidence
         bbox = detection.get('bbox', [0, 0, 100, 100])
-        x_center = (bbox[0] + bbox[2]) / 2
-        frame_width = 640  # Assuming 640x480 resolution
+        confidence = detection.get('confidence', 0.5)
         
-        # Determine movement based on trash position
-        if x_center < frame_width * 0.3:
-            # Trash on left side - pivot left
-            self.send_command('a')
-            logger.info("Pivoting LEFT towards trash")
-        elif x_center > frame_width * 0.7:
-            # Trash on right side - pivot right
-            self.send_command('d')
-            logger.info("Pivoting RIGHT towards trash")
-        else:
-            # Trash in center - move forward
-            self.send_command('w')
-            logger.info("Moving FORWARD towards trash")
+        # Calculate center of detection
+        x_center = (bbox[0] + bbox[2]) / 2
+        frame_width = self.frame_width
+        
+        # Calculate steering angle based on trash position
+        # Map frame position (0-640) to steering angle (45-135)
+        # Center (320) = 90 degrees
+        position_ratio = (x_center / frame_width)  # 0.0 to 1.0
+        steer_angle = int(self.steer_min + (position_ratio * (self.steer_max - self.steer_min)))
+        steer_angle = max(self.steer_min, min(self.steer_max, steer_angle))
+        
+        # Calculate throttle based on confidence
+        # Higher confidence = higher throttle
+        # Scale confidence (0.5-1.0) to throttle (min-max)
+        confidence_normalized = max(0.0, min(1.0, (confidence - 0.5) * 2.0))  # Scale 0.5-1.0 to 0.0-1.0
+        throttle = int(self.throttle_min + (confidence_normalized * (self.throttle_max - self.throttle_min)))
+        
+        # Send command to Arduino
+        self.send_rc_command(steer_angle, throttle)
+        
+        # Log the action
+        direction = "LEFT" if steer_angle < 90 else "RIGHT" if steer_angle > 90 else "CENTER"
+        logger.info(f"Moving {direction} (steer={steer_angle}°, throttle={throttle}) "
+                   f"towards {detection.get('class', 'trash')} (confidence: {confidence:.2f})")
     
     def stop_motor(self):
         """Stop motor movement"""
-        self.send_command('x')
-        logger.info("Stopping motor")
+        self.send_rc_command(self.steer_center, 0)
+        logger.info("Stopping RC car")
     
     def set_speed(self, speed: int):
-        """Set motor speed (1-5)"""
-        if 1 <= speed <= 5:
-            self.send_command(str(speed))
-            logger.info(f"Speed set to {speed}")
+        """Set throttle speed (1-9 scale, maps to throttle_min-throttle_max)"""
+        if 1 <= speed <= 9:
+            # Map 1-9 to throttle range
+            throttle = int(self.throttle_min + ((speed - 1) / 8.0) * (self.throttle_max - self.throttle_min))
+            self.send_rc_command(self.steer_center, throttle)
+            logger.info(f"Throttle set to {throttle} (level {speed})")
 
 
 class OptimizedPiTrashDetectionSystem:
@@ -220,12 +244,12 @@ class OptimizedPiTrashDetectionSystem:
             use_advanced=use_advanced
         )
         
-        # Initialize Arduino controller
+        # Initialize RC Car controller
         if simulate_motors:
             self.arduino_controller = None
             logger.info("Motor simulation mode enabled - no Arduino needed")
         else:
-            self.arduino_controller = SimpleArduinoController(serial_port=arduino_port)
+            self.arduino_controller = RCCarController(serial_port=arduino_port)
         
         # Detection tracking (more responsive)
         self.last_detection_time = 0
@@ -401,20 +425,24 @@ class OptimizedPiTrashDetectionSystem:
             # Only move after consecutive detections to avoid false positives
             if self.consecutive_detections >= self.min_consecutive_detections:
                 if self.simulate_motors:
-                    # Simulation mode - just log the action
+                    # Simulation mode - calculate and log the action
                     bbox = best_detection.get('bbox', [0, 0, 100, 100])
+                    confidence = best_detection.get('confidence', 0.5)
                     x_center = (bbox[0] + bbox[2]) / 2
                     frame_width = 640
                     
-                    if x_center < frame_width * 0.3:
-                        action = "PIVOT LEFT"
-                    elif x_center > frame_width * 0.7:
-                        action = "PIVOT RIGHT"
-                    else:
-                        action = "MOVE FORWARD"
+                    # Calculate steering angle (same as real mode)
+                    position_ratio = (x_center / frame_width)
+                    steer_angle = int(45 + (position_ratio * 90))  # 45-135 range
                     
-                    logger.info(f"[SIMULATION] {action} towards {best_detection.get('class', 'trash')} "
-                               f"(confidence: {best_detection.get('confidence', 0):.2f})")
+                    # Calculate throttle based on confidence
+                    confidence_normalized = max(0.0, min(1.0, (confidence - 0.5) * 2.0))
+                    throttle = int(50 + (confidence_normalized * 150))  # 50-200 range
+                    
+                    direction = "LEFT" if steer_angle < 90 else "RIGHT" if steer_angle > 90 else "CENTER"
+                    logger.info(f"[SIMULATION] Steer {direction} ({steer_angle}°), Throttle {throttle} "
+                               f"towards {best_detection.get('class', 'trash')} "
+                               f"(confidence: {confidence:.2f})")
                 else:
                     # Real mode - send commands to Arduino
                     self.arduino_controller.move_towards_trash(best_detection)
