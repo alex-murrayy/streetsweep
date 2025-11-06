@@ -35,6 +35,11 @@ int bufferIndex = 0;
 void setup() {
   Serial.begin(115200);
   
+  // Wait for serial port to be ready (important for some systems)
+  while (!Serial && millis() < 3000) {
+    ; // Wait up to 3 seconds for serial port
+  }
+  
   steeringServo.attach(SERVO_PIN);
   pinMode(MOTOR_PWM_PIN, OUTPUT);
   pinMode(MOTOR_IN1_PIN, OUTPUT);
@@ -44,6 +49,8 @@ void setup() {
   lastCommandTime = millis();
   
   Serial.println("RC Car Controller Ready");
+  Serial.println("Send commands as: <steer,throttle>");
+  Serial.println("Example: <90,200>");
 }
 
 void loop() {
@@ -55,19 +62,42 @@ void checkSerial() {
   while (Serial.available() > 0) {
     char c = Serial.read();
     
+    // Debug: Echo every character received (helps diagnose)
+    Serial.print("RX: 0x");
+    Serial.print((int)c, HEX);
+    Serial.print(" ('");
+    if (c >= 32 && c <= 126) {
+      Serial.print(c);
+    } else {
+      Serial.print("?");
+    }
+    Serial.println("')");
+    
     if (c == '<') {
       // Start of command
       bufferIndex = 0;
       receiving = true;
+      Serial.println("Command start detected");
     } 
     else if (c == '>') {
       // End of command
       receiving = false;
       buffer[bufferIndex] = '\0';
+      Serial.print("Command end detected, buffer: '");
+      Serial.print(buffer);
+      Serial.println("'");
       parseCommand(buffer);
     }
     else if (receiving && bufferIndex < BUFFER_SIZE - 1) {
       buffer[bufferIndex++] = c;
+    }
+    else if (!receiving && c != '\n' && c != '\r' && c != ' ') {
+      // Debug: Show unexpected characters (helps diagnose issues)
+      Serial.print("Unexpected char: '");
+      Serial.print(c);
+      Serial.print("' (0x");
+      Serial.print((int)c, HEX);
+      Serial.println(") - Waiting for '<' to start command");
     }
   }
 }
@@ -79,8 +109,24 @@ void parseCommand(char* cmd) {
   if (steerStr && throttleStr) {
     currentSteer = atoi(steerStr);
     currentThrottle = atoi(throttleStr);
+    
+    // Debug: Echo received command
+    Serial.print("Received: <");
+    Serial.print(steerStr);
+    Serial.print(",");
+    Serial.print(throttleStr);
+    Serial.print("> -> Steer=");
+    Serial.print(currentSteer);
+    Serial.print(", Throttle=");
+    Serial.println(currentThrottle);
+    
     setHardware(currentSteer, currentThrottle);
     lastCommandTime = millis();
+  } else {
+    // Debug: Show parse error
+    Serial.print("Parse error: '");
+    Serial.print(cmd);
+    Serial.println("' (expected format: <steer,throttle>)");
   }
 }
 
@@ -95,8 +141,18 @@ void setHardware(int steer, int throttle) {
   steer = constrain(steer, 45, 135);
   throttle = constrain(throttle, -255, 255);
   
+  // Debug: Show what we're setting
+  Serial.print("Setting hardware - Steer: ");
+  Serial.print(steer);
+  Serial.print(", Throttle: ");
+  Serial.println(throttle);
+  
   // Set steering
   steeringServo.write(steer);
+  Serial.print("Servo pin ");
+  Serial.print(SERVO_PIN);
+  Serial.print(" set to ");
+  Serial.println(steer);
   
   // Set motor
   if (throttle > 0) {
@@ -104,18 +160,34 @@ void setHardware(int steer, int throttle) {
     digitalWrite(MOTOR_IN1_PIN, HIGH);
     digitalWrite(MOTOR_IN2_PIN, LOW);
     analogWrite(MOTOR_PWM_PIN, throttle);
+    Serial.print("Motor FORWARD - IN1=HIGH, IN2=LOW, PWM=");
+    Serial.println(throttle);
   }
   else if (throttle < 0) {
     // Reverse
     digitalWrite(MOTOR_IN1_PIN, LOW);
     digitalWrite(MOTOR_IN2_PIN, HIGH);
     analogWrite(MOTOR_PWM_PIN, abs(throttle));
+    Serial.print("Motor REVERSE - IN1=LOW, IN2=HIGH, PWM=");
+    Serial.println(abs(throttle));
   }
   else {
     // Stop
     digitalWrite(MOTOR_IN1_PIN, HIGH);
     digitalWrite(MOTOR_IN2_PIN, HIGH);
     analogWrite(MOTOR_PWM_PIN, 0);
+    Serial.println("Motor STOP - IN1=HIGH, IN2=HIGH, PWM=0");
   }
+  
+  // Verify pin states (read back)
+  Serial.print("Pin states - IN1: ");
+  Serial.print(digitalRead(MOTOR_IN1_PIN));
+  Serial.print(", IN2: ");
+  Serial.print(digitalRead(MOTOR_IN2_PIN));
+  Serial.print(", PWM pin ");
+  Serial.print(MOTOR_PWM_PIN);
+  Serial.print(": ");
+  // Note: Can't directly read PWM value, but we can verify it's configured
+  Serial.println("(PWM output)");
 }
 
